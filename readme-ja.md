@@ -5,7 +5,7 @@ PDFファイルの内容を高速かつ効率的に検索するためのデス�
 ## 特徴
 
 - **高速検索**: インデックスを使用して瞬時に検索結果を表示
-- **柔軟な検索オプション**: 
+- **柔軟な検索オプション**:
   - あいまい検索（複数キーワード）
   - 完全一致検索
   - サブフォルダー検索
@@ -17,7 +17,7 @@ PDFファイルの内容を高速かつ効率的に検索するためのデス�
 
 ## スクリーンショット
 
-[ここにアプリケーションのスクリーンショットを挿入]
+<img src="images/image250509_141524.png" width="700" alt="image250509_141524.png">
 
 ## 必要環境
 
@@ -31,14 +31,14 @@ PDFファイルの内容を高速かつ効率的に検索するためのデス�
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/pdf_indexer_searcher.git
-cd pdf_indexer_searcher
+git clone https://github.com/calico-blanket/pdf-search.git
+cd pdf-search
 
 # 必要なライブラリのインストール
 pip install -r requirements.txt
 
 # アプリケーションの実行
-python pdf_indexer_searcher.py
+python pdf_indepdf-search.py
 ```
 
 ## 使用方法

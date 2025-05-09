@@ -1,0 +1,9 @@
+{
+    "pdf_folder": "",
+    "db_folder": "",
+    "exclude_patterns": [
+        "除外したいテキスト1…",
+        "除外したいテキスト2…"
+    ],
+    "include_subfolders_index": false
+}
