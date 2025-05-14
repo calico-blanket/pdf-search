@@ -15,13 +15,74 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 class Settings:
     def __init__(self):
-        # アプリケーションと同じディレクトリに settings.json を配置
-        self.settings_file = Path(__file__).parent / "settings.json"
+        # アプリケーションと同じディレクトリにlast_config_path.jsonというファイルで
+        # 最後に使用した設定ファイルのパスを保存
+        self.last_config_path_file = Path(__file__).parent / "last_config_path.json"
+        
+        # 最後に使用した設定ファイルのパスを読み込む
+        self.settings_file = self._get_last_settings_path()
+        
+        # 設定ファイルから設定内容を読み込む
         self.settings = self._load_settings()
+
+    def _get_last_settings_path(self) -> Path:
+        """最後に使用した設定ファイルのパスを取得"""
+        if self.last_config_path_file.exists():
+            try:
+                with open(self.last_config_path_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    last_path = data.get("last_settings_path")
+                    if last_path and Path(last_path).exists():
+                        return Path(last_path)
+            except Exception as e:
+                print(f"前回の設定ファイルパスの読み込みに失敗: {e}")
+        
+        # デフォルトのパス（アプリケーションと同じディレクトリ）
+        return Path(__file__).parent / "settings.json"
+    
+    def _save_last_settings_path(self):
+        """使用した設定ファイルのパスを保存"""
+        try:
+            with open(self.last_config_path_file, 'w', encoding='utf-8') as f:
+                json.dump({"last_settings_path": str(self.settings_file)}, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"設定ファイルパスの保存に失敗: {e}")
+
+    def load_settings_from_file(self, file_path: str) -> bool:
+        """指定されたファイルから設定を読み込む"""
+        file_path = Path(file_path)
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+                self.settings_file = file_path
+                self._save_last_settings_path()  # 読み込んだパスを記録
+                return True
+            except Exception as e:
+                print(f"設定ファイルの読み込みに失敗: {e}")
+                return False
+        return False
+
+    def save_settings_to_file(self, file_path: str) -> bool:
+        """現在の設定を指定されたファイルに保存"""
+        try:
+            file_path = Path(file_path)
+            # 設定ファイルのディレクトリが存在しない場合は作成
+            os.makedirs(file_path.parent, exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=4)
+            
+            # 保存したパスを現在の設定ファイルとして記録
+            self.settings_file = file_path
+            self._save_last_settings_path()
+            return True
+        except Exception as e:
+            print(f"設定ファイルの保存に失敗: {e}")
+            return False
 
     def _load_settings(self) -> Dict:
         """設定ファイルから設定を読み込む"""
-        if (self.settings_file.exists()):
+        if self.settings_file.exists():
             try:
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
@@ -36,14 +97,18 @@ class Settings:
             "pdf_folder": "",
             "db_folder": "",
             "exclude_patterns": ['除外したいテキスト1…', '除外したいテキスト2…'],
-            "include_subfolders_index": False  # インデックス作成用のみ残す
+            "include_subfolders_index": False
         }
 
     def save_settings(self):
-        """設定をファイルに保存"""
+        """現在の設定を現在のファイルパスに保存"""
         try:
+            # 設定ファイルのディレクトリが存在しない場合は作成
+            os.makedirs(self.settings_file.parent, exist_ok=True)
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=4)
+            # 保存したパスを記録
+            self._save_last_settings_path()
         except Exception as e:
             print(f"設定ファイルの保存に失敗: {e}")
 
@@ -79,16 +144,13 @@ class ConfigDialog(tk.Toplevel):
         y = (screen_height - self.winfo_height()) // 2
         self.geometry(f"+{x}+{y}")
         
-        # 設定が空の場合は、ダイアログを閉じられないようにする
-        if not self.settings.get_setting("pdf_folder") or not self.settings.get_setting("db_folder"):
-            self.protocol("WM_DELETE_WINDOW", lambda: None)
-        else:
-            self.protocol("WM_DELETE_WINDOW", self.destroy)
+        # 設定が空の場合でも、ダイアログを閉じられるようにする（初回起動時に設定画面を表示しない）
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
-
+        
         # PDFフォルダー設定
         pdf_frame = ttk.LabelFrame(main_frame, text="PDF検索フォルダー", padding="5")
         pdf_frame.pack(fill=tk.X, pady=5)
@@ -160,7 +222,7 @@ class ConfigDialog(tk.Toplevel):
 ・インデックスDBフォルダー: 検索用のインデックスファイルを保存するフォルダーを選択してください。
 ・検索除外テキスト: ファイル名にこれらのテキストが含まれる場合、検索対象から除外されます。
 ※ 共有フォルダーのパスは、\\\\サーバー名\\フォルダー名 の形式で入力することもできます。
-        """
+"""
         help_label = ttk.Label(main_frame, text=help_text, wraplength=550, justify=tk.LEFT)
         help_label.pack(fill=tk.X, pady=10, side=tk.BOTTOM)  # side=tk.BOTTOMを追加
 
@@ -168,9 +230,13 @@ class ConfigDialog(tk.Toplevel):
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=10)
 
+        # 保存ボタンとキャンセルボタン
         ttk.Button(button_frame, text="保存", command=self._save_settings).pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="キャンセル", command=self.destroy).pack(side=tk.RIGHT)
         
+        # 保存先指定ボタンを追加
+        ttk.Button(button_frame, text="名前を付けて保存", command=self._save_settings_as).pack(side=tk.LEFT, padx=5)
+            
     def _browse_pdf_folder(self):
         folder = filedialog.askdirectory(initialdir=self.pdf_path_var.get())
         if folder:
@@ -194,20 +260,57 @@ class ConfigDialog(tk.Toplevel):
         if selection:
             self.exclude_listbox.delete(selection)
 
+    def _save_settings_as(self):
+        """設定を別名で保存"""
+        file_path = filedialog.asksaveasfilename(
+            title="設定ファイルを保存",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(self.settings.settings_file))
+        )
+        
+        if file_path:
+            # 現在の設定内容を更新
+            self._update_settings_data()
+            # 指定されたパスに保存
+            if self.settings.save_settings_to_file(file_path):
+                messagebox.showinfo("成功", f"設定を保存しました: {file_path}")
+                
+                if self.callback:
+                    self.callback()
+                
+                self.destroy()
+            else:
+                messagebox.showerror("エラー", "設定の保存に失敗しました")
+
     def _save_settings(self):
         """設定を保存"""
+        # 設定の更新
+        self._update_settings_data()
+        
+        # 現在のパスに保存
+        if self.settings.save_settings():
+            if self.callback:
+                self.callback()
+            
+            self.destroy()
+        else:
+            messagebox.showerror("エラー", "設定の保存に失敗しました")
+    
+    def _update_settings_data(self):
+        """UI入力からsettingsオブジェクトのデータを更新"""
         pdf_folder = self.pdf_path_var.get()
         db_folder = self.db_path_var.get()
 
         # 除外パターンの取得
         exclude_patterns = list(self.exclude_listbox.get(0, tk.END))
 
-        # 設定の保存
+        # 設定の更新
         self.settings.update_setting("pdf_folder", pdf_folder)
         self.settings.update_setting("db_folder", db_folder)
         self.settings.update_setting("exclude_patterns", exclude_patterns)
         self.settings.update_setting("include_subfolders_index", self.include_subfolders_index_var.get())
-        
+
         if self.callback:
             self.callback()
         
@@ -416,9 +519,6 @@ def import_pdf_module(search_system):
             cursor = conn.cursor()
             
             try:
-                # # PDFファイルのカウント中であることを表示
-                # search_system.indexing_progress["status"] = "PDFファイルを検索中..."
-                
                 # PDFファイルのリストアップ
                 if search_system.include_subfolders_index:
                     pdf_files = list(Path(search_system.folder_path).glob("**/*.pdf"))
@@ -481,20 +581,6 @@ def import_pdf_module(search_system):
     finally:
         search_system.indexing_complete.set()
 
-        # def index_pdfs():
-        #     """PDFファイルのインデックス作成（差分更新）"""
-        #     conn = sqlite3.connect(str(search_system.db_path))
-        #     cursor = conn.cursor()
-            
-        #     try:
-        #         # PDFファイルのリストアップ（サブフォルダーの設定に応じて）
-        #         if search_system.include_subfolders:
-        #             pdf_files = list(Path(search_system.folder_path).glob("**/*.pdf"))
-        #         else:
-        #             pdf_files = list(Path(search_system.folder_path).glob("*.pdf"))
-                
-        #         search_system.indexing_progress["total"] = len(pdf_files)
-        #         search_system.indexing_progress["current"] = 0
 def main():
     """メインアプリケーション"""
     root = tk.Tk()
@@ -510,6 +596,17 @@ def main():
     progress_frame.pack(fill='x', pady=(0, 10))
     progress_label = tk.Label(progress_frame, text="インデックスサーチの準備中...", fg="blue")
     progress_label.pack(fill='x')
+
+    # 設定説明フレーム
+    config_help_frame = tk.Frame(main_frame)
+    config_help_frame.pack(fill='x', pady=(0, 10))
+    config_help_text = """設定について:
+    
+・「設定」メニューから、PDFフォルダー、インデックスDBフォルダー、検索除外パターンなどを設定できます。
+・設定ファイルは任意の場所に保存でき、次回起動時に自動的に読み込まれます。
+・初めて使用する場合や設定に問題がある場合は、メニューから「設定を編集」を選択してください。
+"""
+    tk.Label(config_help_frame, text=config_help_text, justify=tk.LEFT).pack(anchor='w')
 
     # 検索説明フレーム
     help_frame = tk.Frame(main_frame)
@@ -700,6 +797,13 @@ def main():
         """検索システムの初期化とインデックス作成の開始"""
         nonlocal search_system
         search_system = PDFSearchSystem(settings)
+        
+        # 設定が空の場合は設定画面を表示
+        if not settings.get_setting("pdf_folder") or not settings.get_setting("db_folder"):
+            messagebox.showinfo("設定が必要です", "PDFフォルダーとインデックスDBフォルダーを設定してください。")
+            config_dialog = ConfigDialog(root, settings, callback=start_indexing_after_config)
+            return
+            
         progress_label.config(text="インデックス作成の準備中...")
         progress_label.update()
         import_thread = threading.Thread(target=lambda: import_pdf_module(search_system))
@@ -711,12 +815,8 @@ def main():
     settings = Settings()
     search_system = None
 
-    # 初回起動時は設定を必須に
-    if not settings.get_setting("pdf_folder") or not settings.get_setting("db_folder"):
-        config_dialog = ConfigDialog(root, settings, callback=start_indexing_after_config)
-        root.wait_window(config_dialog)
-    else:
-        start_indexing_after_config()
+    # 初回起動時も含め自動的に設定読み込みとインデックス作成を開始
+    start_indexing_after_config()
 
     # メニューバーの作成
     menubar = tk.Menu(root)
@@ -726,9 +826,54 @@ def main():
     settings_menu = tk.Menu(menubar, tearoff=0)
     menubar.add_cascade(label="設定", menu=settings_menu)
     settings_menu.add_command(
-        label="フォルダー設定", 
-        command=lambda: ConfigDialog(root, settings, lambda: search_system.__init__(settings))
+        label="設定を編集", 
+        command=lambda: ConfigDialog(root, settings, callback=start_indexing_after_config)
     )
+    
+    # 設定ファイル関連のメニュー項目
+    settings_menu.add_separator()
+    settings_menu.add_command(
+        label="設定ファイルを開く",
+        command=lambda: load_settings_file()
+    )
+    
+    settings_menu.add_command(
+        label="名前を付けて設定を保存",
+        command=lambda: save_settings_as()
+    )
+
+    # 設定ファイルを開く
+    def load_settings_file():
+        file_path = filedialog.askopenfilename(
+            title="設定ファイルを開く",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(settings.settings_file))
+        )
+        
+        if file_path:
+            if settings.load_settings_from_file(file_path):
+                messagebox.showinfo("成功", f"設定ファイルを読み込みました: {file_path}")
+                start_indexing_after_config()
+            else:
+                messagebox.showerror("エラー", "設定ファイルの読み込みに失敗しました")
+
+    # 設定を別名で保存
+    def save_settings_as():
+        file_path = filedialog.asksaveasfilename(
+            title="設定ファイルを保存",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(settings.settings_file))
+        )
+        
+        if file_path:
+            if settings.save_settings_to_file(file_path):
+                messagebox.showinfo("成功", f"設定ファイルを保存しました: {file_path}")
+                # 保存後、その設定ファイルを使用する
+                start_indexing_after_config()
+            else:
+                messagebox.showerror("エラー", "設定ファイルの保存に失敗しました")
 
     # 検索ボタンと保存ボタンと削除ボタン
     button_frame = tk.Frame(search_frame)
