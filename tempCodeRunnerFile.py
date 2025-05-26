@@ -1,0 +1,1 @@
+self.settings.update_setting("include_subfolders_index", self.include_subfolders_index_var.get())
