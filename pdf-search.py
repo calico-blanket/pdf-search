@@ -15,20 +15,72 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 class Settings:
     def __init__(self):
-        # .exe化対応：実行ファイルの実際の場所を取得
-        if getattr(sys, 'frozen', False):
-            # .exe化されている場合（PyInstaller、cx_Freeze等）
-            app_dir = Path(sys.executable).parent
-        else:
-            # .pyファイルから直接実行している場合
-            app_dir = Path(__file__).parent
+        # アプリケーションと同じディレクトリにlast_config_path.jsonというファイルで
+        # 最後に使用した設定ファイルのパスを保存
+        self.last_config_path_file = Path(__file__).parent / "last_config_path.json"
         
-        self.settings_file = app_dir / "settings.json"
+        # 最後に使用した設定ファイルのパスを読み込む
+        self.settings_file = self._get_last_settings_path()
+        
+        # 設定ファイルから設定内容を読み込む
         self.settings = self._load_settings()
+
+    def _get_last_settings_path(self) -> Path:
+        """最後に使用した設定ファイルのパスを取得"""
+        if self.last_config_path_file.exists():
+            try:
+                with open(self.last_config_path_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    last_path = data.get("last_settings_path")
+                    if last_path and Path(last_path).exists():
+                        return Path(last_path)
+            except Exception as e:
+                print(f"前回の設定ファイルパスの読み込みに失敗: {e}")
+        
+        # デフォルトのパス（アプリケーションと同じディレクトリ）
+        return Path(__file__).parent / "settings.json"
+    
+    def _save_last_settings_path(self):
+        """使用した設定ファイルのパスを保存"""
+        try:
+            with open(self.last_config_path_file, 'w', encoding='utf-8') as f:
+                json.dump({"last_settings_path": str(self.settings_file)}, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"設定ファイルパスの保存に失敗: {e}")
+
+    def load_settings_from_file(self, file_path: str) -> bool:
+        """指定されたファイルから設定を読み込む"""
+        file_path = Path(file_path)
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+                self.settings_file = file_path
+                self._save_last_settings_path()
+                return True
+            except Exception as e:
+                print(f"設定ファイルの読み込みに失敗: {e}")
+                return False
+        return False
+
+    def save_settings_to_file(self, file_path: str) -> bool:
+        """現在の設定を指定されたファイルに保存"""
+        try:
+            file_path = Path(file_path)
+            os.makedirs(file_path.parent, exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=4)
+            
+            self.settings_file = file_path
+            self._save_last_settings_path()
+            return True
+        except Exception as e:
+            print(f"設定ファイルの保存に失敗: {e}")
+            return False
 
     def _load_settings(self) -> Dict:
         """設定ファイルから設定を読み込む"""
-        if (self.settings_file.exists()):
+        if self.settings_file.exists():
             try:
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
@@ -43,17 +95,16 @@ class Settings:
             "pdf_folder": "",
             "db_folder": "",
             "exclude_patterns": ['除外したいテキスト1…', '除外したいテキスト2…'],
-            "include_subfolders_index": False  # インデックス作成用のみ残す
+            "include_subfolders_index": False
         }
 
     def save_settings(self):
-        """設定をファイルに保存"""
+        """現在の設定を現在のファイルパスに保存"""
         try:
-            print(f"設定ファイル保存先: {self.settings_file}")
-            print(f"ディレクトリ存在確認: {self.settings_file.parent.exists()}")
+            os.makedirs(self.settings_file.parent, exist_ok=True)
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=4)
-            print("設定ファイルの保存に成功しました")
+            self._save_last_settings_path()
         except Exception as e:
             print(f"設定ファイルの保存に失敗: {e}")
 
@@ -65,25 +116,21 @@ class Settings:
         """設定値を更新"""
         self.settings[key] = value
         self.save_settings()
-
-#part2
-
+        
 class ConfigDialog(tk.Toplevel):
     def __init__(self, parent, settings: Settings, callback=None):
         super().__init__(parent)
         self.settings = settings
         self.callback = callback
         self.title("フォルダー設定")
-        self.geometry("600x650")  # ウィンドウの高さを増やす
+        self.geometry("600x650")
         self.resizable(True, True)
         
-        # モーダルダイアログとして表示
         self.transient(parent)
         self.grab_set()
         
         self._create_widgets()
         
-        # 画面中央に表示
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
@@ -91,16 +138,12 @@ class ConfigDialog(tk.Toplevel):
         y = (screen_height - self.winfo_height()) // 2
         self.geometry(f"+{x}+{y}")
         
-        # 設定が空の場合は、ダイアログを閉じられないようにする
-        if not self.settings.get_setting("pdf_folder") or not self.settings.get_setting("db_folder"):
-            self.protocol("WM_DELETE_WINDOW", lambda: None)
-        else:
-            self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
-
+        
         # PDFフォルダー設定
         pdf_frame = ttk.LabelFrame(main_frame, text="PDF検索フォルダー", padding="5")
         pdf_frame.pack(fill=tk.X, pady=5)
@@ -125,11 +168,9 @@ class ConfigDialog(tk.Toplevel):
         exclude_frame = ttk.LabelFrame(main_frame, text="検索除外テキスト（ファイル名）", padding="5")
         exclude_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # リストボックスと入力部分を含むフレーム
         pattern_container = ttk.Frame(exclude_frame)
         pattern_container.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # リストボックスとスクロールバー
         self.exclude_listbox = tk.Listbox(pattern_container, height=6)
         self.exclude_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -137,23 +178,19 @@ class ConfigDialog(tk.Toplevel):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.exclude_listbox.configure(yscrollcommand=scrollbar.set)
 
-        # 現在の除外パターンを表示
         for pattern in self.settings.get_setting("exclude_patterns"):
             self.exclude_listbox.insert(tk.END, pattern)
 
-        # パターン編集用のフレーム
         edit_frame = ttk.Frame(exclude_frame)
         edit_frame.pack(fill=tk.X, pady=5)
 
-        # 新規パターン入力欄
         self.new_pattern_var = tk.StringVar()
         ttk.Entry(edit_frame, textvariable=self.new_pattern_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        # ボタン
         ttk.Button(edit_frame, text="追加", command=self._add_pattern).pack(side=tk.LEFT, padx=2)
         ttk.Button(edit_frame, text="削除", command=self._remove_pattern).pack(side=tk.LEFT, padx=2)
 
-        # サブフォルダー検索設定（インデックス作成用）のみ残す
+        # サブフォルダー検索設定
         subfolder_frame_index = ttk.Frame(main_frame)
         subfolder_frame_index.pack(fill=tk.X, pady=5)
 
@@ -172,9 +209,9 @@ class ConfigDialog(tk.Toplevel):
 ・インデックスDBフォルダー: 検索用のインデックスファイルを保存するフォルダーを選択してください。
 ・検索除外テキスト: ファイル名にこれらのテキストが含まれる場合、検索対象から除外されます。
 ※ 共有フォルダーのパスは、\\\\サーバー名\\フォルダー名 の形式で入力することもできます。
-        """
+"""
         help_label = ttk.Label(main_frame, text=help_text, wraplength=550, justify=tk.LEFT)
-        help_label.pack(fill=tk.X, pady=10, side=tk.BOTTOM)  # side=tk.BOTTOMを追加
+        help_label.pack(fill=tk.X, pady=10, side=tk.BOTTOM)
 
         # ボタンフレーム
         button_frame = ttk.Frame(main_frame)
@@ -182,7 +219,8 @@ class ConfigDialog(tk.Toplevel):
 
         ttk.Button(button_frame, text="保存", command=self._save_settings).pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="キャンセル", command=self.destroy).pack(side=tk.RIGHT)
-        
+        ttk.Button(button_frame, text="名前を付けて保存", command=self._save_settings_as).pack(side=tk.LEFT, padx=5)
+            
     def _browse_pdf_folder(self):
         folder = filedialog.askdirectory(initialdir=self.pdf_path_var.get())
         if folder:
@@ -194,38 +232,52 @@ class ConfigDialog(tk.Toplevel):
             self.db_path_var.set(folder)
 
     def _add_pattern(self):
-        """除外パターンを追加"""
         pattern = self.new_pattern_var.get().strip()
         if pattern:
             self.exclude_listbox.insert(tk.END, pattern)
             self.new_pattern_var.set("")
 
     def _remove_pattern(self):
-        """選択された除外パターンを削除"""
         selection = self.exclude_listbox.curselection()
         if selection:
             self.exclude_listbox.delete(selection)
 
+    def _save_settings_as(self):
+        file_path = filedialog.asksaveasfilename(
+            title="設定ファイルを保存",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(self.settings.settings_file))
+        )
+        
+        if file_path:
+            self._update_settings_data()
+            if self.settings.save_settings_to_file(file_path):
+                messagebox.showinfo("成功", f"設定を保存しました: {file_path}")
+                if self.callback:
+                    self.callback()
+                self.destroy()
+            else:
+                messagebox.showerror("エラー", "設定の保存に失敗しました")
+
     def _save_settings(self):
-        """設定を保存"""
+        self._update_settings_data()
+        if self.settings.save_settings():
+            if self.callback:
+                self.callback()
+            self.destroy()
+        else:
+            messagebox.showerror("エラー", "設定の保存に失敗しました")
+    
+    def _update_settings_data(self):
         pdf_folder = self.pdf_path_var.get()
         db_folder = self.db_path_var.get()
-
-        # 除外パターンの取得
         exclude_patterns = list(self.exclude_listbox.get(0, tk.END))
 
-        # 設定の保存
         self.settings.update_setting("pdf_folder", pdf_folder)
         self.settings.update_setting("db_folder", db_folder)
         self.settings.update_setting("exclude_patterns", exclude_patterns)
         self.settings.update_setting("include_subfolders_index", self.include_subfolders_index_var.get())
-        
-        if self.callback:
-            self.callback()
-        
-        self.destroy()
-        
-#part3
 
 class PDFSearchSystem:
     def __init__(self, settings: Settings):
@@ -239,11 +291,10 @@ class PDFSearchSystem:
         self.indexing_progress = {
             "total": 0, 
             "current": 0,
-            "status": "インデックス作成の準備中..."  # 状態メッセージを追加
+            "status": "インデックス作成の準備中..."
         }
-        # クエリ結果のキャッシュを追加
         self._query_cache = {}
-        self._cache_timeout = 300  # 5分
+        self._cache_timeout = 300
 
     def _normalize_text(self, text: str) -> str:
         """抽出したテキストを正規化"""
@@ -286,10 +337,8 @@ class PDFSearchSystem:
 
     def search(self, query: str, exact_match: bool = False, include_subfolders: bool = False) -> List[Dict]:
         """PDFの検索を実行"""
-        # キャッシュキーの生成
         cache_key = f"{query}_{exact_match}_{include_subfolders}"
         
-        # 有効なキャッシュがあれば使用
         cached_result = self._query_cache.get(cache_key)
         if cached_result and time.time() - cached_result['time'] < self._cache_timeout:
             return cached_result['results']
@@ -298,9 +347,7 @@ class PDFSearchSystem:
         cursor = conn.cursor()
         
         try:
-            # SQLクエリの作成
             if exact_match:
-                # 1語の場合は前後にスペースが追加済みのqueryをそのまま使用
                 sql = """
                     SELECT file_path, content, last_modified 
                     FROM pdf_contents 
@@ -323,9 +370,7 @@ class PDFSearchSystem:
                     WHERE {query_parts}
                 """
 
-            # サブフォルダー設定に基づいてパスのフィルタリング
             if not include_subfolders:
-                # サブフォルダーを含まない場合、ベースフォルダー直下のファイルのみを対象とする
                 sql += " AND file_path NOT LIKE ?"
                 base_path_str = str(Path(self.folder_path)).replace('\\', '\\\\') + "\\\\%\\\\"
                 params.append(base_path_str)
@@ -335,10 +380,9 @@ class PDFSearchSystem:
             cursor.execute(sql, params)
             results = []
             for file_path, content, last_modified in cursor.fetchall():
-                # ファイルパスのチェック（サブフォルダー設定とファイル名除外パターンに基づく）
                 path_obj = Path(file_path)
                 if (include_subfolders or path_obj.parent == Path(self.folder_path)) and \
-                   not self.should_exclude_file(path_obj):  # 除外パターンのチェックを追加
+                   not self.should_exclude_file(path_obj):
                     context = self._extract_context(content, query, exact_match)
                     results.append({
                         "file_path": file_path,
@@ -347,7 +391,7 @@ class PDFSearchSystem:
                         "last_modified": time.strftime('%Y-%m-%d %H:%M:%S', 
                                                      time.localtime(last_modified))
                     })
-            # 結果をキャッシュ
+            
             self._query_cache[cache_key] = {
                 'time': time.time(),
                 'results': results
@@ -356,133 +400,209 @@ class PDFSearchSystem:
             
         finally:
             conn.close()
-#part4
+
 def import_pdf_module(search_system):
-    """PDFモジュールのインポートとインデックス作成を別スレッドで実行"""
+    """PDFモジュールのインポートとインデックス作成を別スレッドで実行（改善版）"""
+    # 利用可能なライブラリを記録
+    available_libraries = {}
+    
+    # PyMuPDF（最優先）
+    try:
+        import fitz
+        available_libraries['pymupdf'] = fitz
+        print("PyMuPDF が利用可能です（推奨）")
+    except ImportError:
+        print("PyMuPDF がインストールされていません（推奨ライブラリ）")
+
+    # pdfplumber
     try:
         import pdfplumber
-        from pypdf import PdfReader
+        available_libraries['pdfplumber'] = pdfplumber
+        print("pdfplumber が利用可能です")
+    except ImportError:
+        print("pdfplumber がインストールされていません")
 
-        def extract_text_from_pdf(pdf_path: Path) -> str:
-            """複数の方法を組み合わせてPDFからテキストを抽出"""
-            content = ""
-            
+    # pypdf
+    try:
+        from pypdf import PdfReader
+        available_libraries['pypdf'] = PdfReader
+        print("pypdf が利用可能です")
+    except ImportError:
+        print("pypdf がインストールされていません")
+
+    # 利用可能なライブラリがない場合の処理
+    if not available_libraries:
+        print("エラー: PDFライブラリが一つもインストールされていません")
+        print("以下をインストールしてください: pip install PyMuPDF pdfplumber pypdf")
+        return
+
+    def extract_text_from_pdf(pdf_path: Path) -> str:
+        """利用可能なライブラリを優先順位に従って使用"""
+        content = ""
+        
+        # 方法1: PyMuPDF（最高速・最堅牢）
+        if 'pymupdf' in available_libraries:
             try:
-                with pdfplumber.open(pdf_path) as pdf:
-                    for page in pdf.pages:
-                        text = page.extract_text(layout=True)
+                doc = available_libraries['pymupdf'].open(pdf_path)
+                for page_num in range(len(doc)):
+                    try:
+                        page = doc.load_page(page_num)
+                        text = page.get_text()
                         if text:
                             content += text + "\n"
-                        
-                        tables = page.extract_tables()
-                        for table in tables:
-                            for row in table:
-                                content += " ".join([str(cell) for cell in row if cell]) + "\n"
+                    except Exception as page_e:
+                        print(f"PyMuPDF page {page_num + 1} failed in {pdf_path}: {page_e}")
+                        continue
+                doc.close()
+                
+                if content.strip():
+                    return search_system._normalize_text(content)
+                    
+            except Exception as e:
+                print(f"PyMuPDF failed for {pdf_path}: {e}")
+        
+        # 方法2: pdfplumber（PyMuPDFが失敗時）
+        if 'pdfplumber' in available_libraries:
+            try:
+                with available_libraries['pdfplumber'].open(pdf_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        try:
+                            text = page.extract_text(layout=True)
+                            if text:
+                                content += text + "\n"
+                            
+                            # テーブル抽出（エラー時は無視）
+                            try:
+                                tables = page.extract_tables()
+                                for table in tables:
+                                    for row in table:
+                                        content += " ".join([str(cell) for cell in row if cell]) + "\n"
+                            except:
+                                pass
+                                
+                        except Exception as page_e:
+                            print(f"pdfplumber page {page_num + 1} failed in {pdf_path}: {page_e}")
+                            continue
+                            
+                if content.strip():
+                    return search_system._normalize_text(content)
                             
             except Exception as e:
                 print(f"pdfplumber failed for {pdf_path}: {e}")
-                
-                try:
-                    reader = PdfReader(pdf_path)
-                    for page in reader.pages:
+        
+        # 方法3: pypdf（最後の手段）
+        if 'pypdf' in available_libraries:
+            try:
+                reader = available_libraries['pypdf'](pdf_path)
+                for page_num, page in enumerate(reader.pages):
+                    try:
                         text = page.extract_text()
                         if text:
                             content += text + "\n"
-                except Exception as e:
-                    print(f"PyPDF also failed for {pdf_path}: {e}")
-                    return ""
+                    except Exception as page_e:
+                        print(f"pypdf page {page_num + 1} failed in {pdf_path}: {page_e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"pypdf failed for {pdf_path}: {e}")
 
+        # 最終結果
+        if content.strip():
             return search_system._normalize_text(content)
+        else:
+            print(f"Warning: No content extracted from {pdf_path}")
+            return ""
 
-        def should_exclude_file(file_path: Path) -> bool:
-            """ファイルを検索対象から除外すべきかを判定"""
-            return search_system.should_exclude_file(file_path)  # クラスのメソッドを使用
+    def should_exclude_file(file_path: Path) -> bool:
+        """ファイルを検索対象から除外すべきかを判定"""
+        return search_system.should_exclude_file(file_path)
 
-        def setup_database():
-            """データベースとテーブルの初期設定"""
-            os.makedirs(os.path.dirname(search_system.db_path), exist_ok=True)
-            conn = sqlite3.connect(str(search_system.db_path))
-            cursor = conn.cursor()
+    def setup_database():
+        """データベースとテーブルの初期設定"""
+        os.makedirs(os.path.dirname(search_system.db_path), exist_ok=True)
+        conn = sqlite3.connect(str(search_system.db_path))
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pdf_contents (
+                    id INTEGER PRIMARY KEY,
+                    file_path TEXT UNIQUE,
+                    content TEXT,
+                    last_modified REAL,
+                    created_at REAL,
+                    updated_at REAL
+                )
+            ''')
             
-            try:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS pdf_contents (
-                        id INTEGER PRIMARY KEY,
-                        file_path TEXT UNIQUE,
-                        content TEXT,
-                        last_modified REAL,
-                        created_at REAL,
-                        updated_at REAL
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_content 
+                ON pdf_contents(content)
+            ''')
+            
+            conn.commit()
+        finally:
+            conn.close()
+
+    def index_pdfs():
+        """PDFファイルのインデックス作成（差分更新）"""
+        conn = sqlite3.connect(str(search_system.db_path))
+        cursor = conn.cursor()
+        
+        try:
+            # PDFファイルのリストアップ
+            if search_system.include_subfolders_index:
+                pdf_files = list(Path(search_system.folder_path).glob("**/*.pdf"))
+            else:
+                pdf_files = list(Path(search_system.folder_path).glob("*.pdf"))
+            
+            # 進行状況の更新
+            search_system.indexing_progress["status"] = "インデックスをサーチ中。既存のインデックス分は検索できます。..."
+            search_system.indexing_progress["total"] = len(pdf_files)
+            search_system.indexing_progress["current"] = 0
+            
+            # インデックス処理
+            with conn:
+                for pdf_path in pdf_files:
+                    search_system.indexing_progress["current"] += 1
+                    
+                    if should_exclude_file(pdf_path):
+                        continue
+
+                    last_modified = os.path.getmtime(pdf_path)
+                    
+                    cursor.execute(
+                        "SELECT last_modified FROM pdf_contents WHERE file_path = ?", 
+                        (str(pdf_path),)
                     )
-                ''')
-                
-                cursor.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_content 
-                    ON pdf_contents(content)
-                ''')
-                
-                conn.commit()
-            finally:
-                conn.close()
-                
-        def index_pdfs():
-            """PDFファイルのインデックス作成（差分更新）"""
-            conn = sqlite3.connect(str(search_system.db_path))
-            cursor = conn.cursor()
-            
-            try:
-                # PDFファイルのリストアップ
-                if search_system.include_subfolders_index:
-                    pdf_files = list(Path(search_system.folder_path).glob("**/*.pdf"))
-                else:
-                    pdf_files = list(Path(search_system.folder_path).glob("*.pdf"))
-                
-                # インデックス作成開始を表示
-                search_system.indexing_progress["status"] = "インデックスをサーチ中。既存のインデックス分は検索できます。..."
-                search_system.indexing_progress["total"] = len(pdf_files)
-                search_system.indexing_progress["current"] = 0
-                
-                # トランザクションを開始
-                with conn:
-                    for pdf_path in pdf_files:
-                        search_system.indexing_progress["current"] += 1
+                    result = cursor.fetchone()
+                    
+                    if not result or result[0] < last_modified:
+                        try:
+                            content = extract_text_from_pdf(pdf_path)
+                            if not content:
+                                continue
+                                
+                            current_time = time.time()
+                            if result:
+                                cursor.execute('''
+                                    UPDATE pdf_contents 
+                                    SET content = ?, last_modified = ?, updated_at = ?
+                                    WHERE file_path = ?
+                                ''', (content, last_modified, current_time, str(pdf_path)))
+                            else:
+                                cursor.execute('''
+                                    INSERT INTO pdf_contents 
+                                    (file_path, content, last_modified, created_at, updated_at)
+                                    VALUES (?, ?, ?, ?, ?)
+                                ''', (str(pdf_path), content, last_modified, current_time, current_time))
                         
-                        if should_exclude_file(pdf_path):
-                            continue
+                        except Exception as e:
+                            print(f"Error processing {pdf_path}: {e}")
+        finally:
+            conn.close()
 
-                        last_modified = os.path.getmtime(pdf_path)
-                        
-                        cursor.execute(
-                            "SELECT last_modified FROM pdf_contents WHERE file_path = ?", 
-                            (str(pdf_path),)
-                        )
-                        result = cursor.fetchone()
-                        
-                        if not result or result[0] < last_modified:
-                            try:
-                                content = extract_text_from_pdf(pdf_path)
-                                if not content:
-                                    continue
-                                    
-                                current_time = time.time()
-                                if result:
-                                    cursor.execute('''
-                                        UPDATE pdf_contents 
-                                        SET content = ?, last_modified = ?, updated_at = ?
-                                        WHERE file_path = ?
-                                    ''', (content, last_modified, current_time, str(pdf_path)))
-                                else:
-                                    cursor.execute('''
-                                        INSERT INTO pdf_contents 
-                                        (file_path, content, last_modified, created_at, updated_at)
-                                        VALUES (?, ?, ?, ?, ?)
-                                    ''', (str(pdf_path), content, last_modified, current_time, current_time))
-                            
-                            except Exception as e:
-                                print(f"Error processing {pdf_path}: {e}")
-            finally:
-                conn.close()
-
+    try:
         # データベースのセットアップを実行
         setup_database()
         # インデックス作成を開始
@@ -492,8 +612,6 @@ def import_pdf_module(search_system):
         print(f"Error in background indexing: {e}")
     finally:
         search_system.indexing_complete.set()
-        
-#part5
 
 def main():
     """メインアプリケーション"""
@@ -501,15 +619,25 @@ def main():
     root.title("PDF検索システム")
     root.geometry("1000x700")
 
-    # メインフレーム
     main_frame = tk.Frame(root, padx=20, pady=20)
     main_frame.pack(expand=True, fill='both')
 
-    # 進捗表示フレーム
+    # 進行表示フレーム
     progress_frame = tk.Frame(main_frame)
     progress_frame.pack(fill='x', pady=(0, 10))
     progress_label = tk.Label(progress_frame, text="インデックスサーチの準備中...", fg="blue")
     progress_label.pack(fill='x')
+
+    # 設定説明フレーム
+    config_help_frame = tk.Frame(main_frame)
+    config_help_frame.pack(fill='x', pady=(0, 10))
+    config_help_text = """設定について:
+    
+・「設定」メニューから、PDFフォルダー、インデックスDBフォルダー、検索除外パターンなどを設定できます。
+・設定ファイルは任意の場所に保存でき、次回起動時に自動的に読み込まれます。
+・初めて使用する場合や設定に問題がある場合は、メニューから「設定を編集」を選択してください。
+"""
+    tk.Label(config_help_frame, text=config_help_text, justify=tk.LEFT).pack(anchor='w')
 
     # 検索説明フレーム
     help_frame = tk.Frame(main_frame)
@@ -700,6 +828,13 @@ def main():
         """検索システムの初期化とインデックス作成の開始"""
         nonlocal search_system
         search_system = PDFSearchSystem(settings)
+        
+        # 設定が空の場合は設定画面を表示
+        if not settings.get_setting("pdf_folder") or not settings.get_setting("db_folder"):
+            messagebox.showinfo("設定が必要です", "PDFフォルダーとインデックスDBフォルダーを設定してください。")
+            config_dialog = ConfigDialog(root, settings, callback=start_indexing_after_config)
+            return
+            
         progress_label.config(text="インデックス作成の準備中...")
         progress_label.update()
         import_thread = threading.Thread(target=lambda: import_pdf_module(search_system))
@@ -711,12 +846,8 @@ def main():
     settings = Settings()
     search_system = None
 
-    # 初回起動時は設定を必須に
-    if not settings.get_setting("pdf_folder") or not settings.get_setting("db_folder"):
-        config_dialog = ConfigDialog(root, settings, callback=start_indexing_after_config)
-        root.wait_window(config_dialog)
-    else:
-        start_indexing_after_config()
+    # 初回起動時も含め自動的に設定読み込みとインデックス作成を開始
+    start_indexing_after_config()
 
     # メニューバーの作成
     menubar = tk.Menu(root)
@@ -726,9 +857,53 @@ def main():
     settings_menu = tk.Menu(menubar, tearoff=0)
     menubar.add_cascade(label="設定", menu=settings_menu)
     settings_menu.add_command(
-        label="フォルダー設定", 
-        command=lambda: ConfigDialog(root, settings, lambda: search_system.__init__(settings))
+        label="設定を編集", 
+        command=lambda: ConfigDialog(root, settings, callback=start_indexing_after_config)
     )
+    
+    # 設定ファイル関連のメニュー項目
+    settings_menu.add_separator()
+    settings_menu.add_command(
+        label="設定ファイルを開く",
+        command=lambda: load_settings_file()
+    )
+    
+    settings_menu.add_command(
+        label="名前を付けて設定を保存",
+        command=lambda: save_settings_as()
+    )
+
+    # 設定ファイルを開く
+    def load_settings_file():
+        file_path = filedialog.askopenfilename(
+            title="設定ファイルを開く",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(settings.settings_file))
+        )
+        
+        if file_path:
+            if settings.load_settings_from_file(file_path):
+                messagebox.showinfo("成功", f"設定ファイルを読み込みました: {file_path}")
+                start_indexing_after_config()
+            else:
+                messagebox.showerror("エラー", "設定ファイルの読み込みに失敗しました")
+
+    # 設定を別名で保存
+    def save_settings_as():
+        file_path = filedialog.asksaveasfilename(
+            title="設定ファイルを保存",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=os.path.dirname(str(settings.settings_file))
+        )
+        
+        if file_path:
+            if settings.save_settings_to_file(file_path):
+                messagebox.showinfo("成功", f"設定ファイルを保存しました: {file_path}")
+                start_indexing_after_config()
+            else:
+                messagebox.showerror("エラー", "設定ファイルの保存に失敗しました")
 
     # 検索ボタンと保存ボタンと削除ボタン
     button_frame = tk.Frame(search_frame)
